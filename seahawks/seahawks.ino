@@ -4,30 +4,33 @@
 #include <SPI.h>
 #include <avr/pgmspace.h>
 
-#define NUMPIXELS 60 // Number of LEDs in strip
-#define HALFPIXELS ( NUMPIXELS / 2 )
-#define QTRPIXELS ( NUMPIXELS / 4 )
+#define NUMPIXELS 		44 // Number of LEDs in strip
+#define HALFPIXELS 		( NUMPIXELS / 2 )
+#define QTRPIXELS 		( NUMPIXELS / 4 )
 
-#define FPS 60
-#define DT ( 1000 / FPS )
-#define DEG_TO_RAD 3.141592 / 180
+#define FPS 			60
+#define DT 				( 1000 / FPS )
+#define DEG_TO_RAD 		3.141592 / 180
 
 // Pallette
-#define DARK_1 0x000033
-#define DARK_2 0x000066
-#define GRAY 0xACB6BC
-#define ACCENT_1 0x00FF00
-#define ACCENT_2 0x33FF33
-#define OFF 0x000000
-#define WHITE 0xFFFFFF
-#define DURATION 1023 // frames as power of 2 - 1
+#define DARK_1 			0x000022
+#define DARK_2 			0x000055
+#define GRAY 			0x464A4d
+#define ACCENT_1 		0x00CC00
+#define ACCENT_2 		0x29CC29
+#define OFF 			0x000000
+#define WHITE 			0xFFFFFF
+
+// frames before next anim. must be power of 2 - 1
+#define DURATION 		2047
 
 enum Anim {
-  CLOUD,
-  CYLON,
-  CYCLE,
-  AnimCount,
-  WIPE // transition
+	CLOUD,
+	CYLON,
+	CYCLE,
+	MARQUEE,
+	AnimCount,
+	WIPE // transition
 };
 
 // Here's how to control the LEDs from any two pins:
@@ -39,96 +42,155 @@ enum Anim {
 // (Arduino Uno = pin 11 for data, 13 for clock, other boards are different).
 Adafruit_DotStar strip = Adafruit_DotStar(NUMPIXELS);
 
-void setup() {
-  delay( 1000 );
-#if defined(__AVR_ATtiny85__) && (F_CPU == 16000000L)
-  clock_prescale_set(clock_div_1); // Enable 16 MHz on Trinket
-#endif
-  Serial.begin(9600);
-  strip.begin(); // Initialize pins for output
-  strip.show();  // Turn all LEDs off ASAP
-//  SPI.setClockDivider(SPI_CLOCK_DIV4);
-}
-
-#define SPAN 4
-
-// Runs 10 LEDs at a time along strip, cycling through red, green and blue.
-// This requires about 200 mA for all the 'on' pixels + 1 mA per 'off' pixel.
-
+// private vars
 int _c = 0, head = 0;
 float _f = 0;
-Anim _next, _state = CYCLE;
+Anim _next, _state;
 
-void loop() {
-  
-  switch ( _state ) {
-    case CLOUD :
-      cloud( 0.5 /*cos( ( _c / 5 ) * DEG_TO_RAD ) * 1.5 + 2*/ );
-      break;
-    case CYLON :
-      cylon( cos( ( _c / 10 ) * DEG_TO_RAD ) * 2 + 2.8, true );
-      break;
-    case CYCLE :
-      cylon( cos( ( _c / 5 ) * DEG_TO_RAD ) * 1.5 + 2, false );
-      break;
-    case WIPE:
-    default:
-      wipe();
-      break;
-  }
+void setup() {
+	Serial.begin(9600);
+	Serial.println("SuperBowl 2015!! #GoHawks");
 
-  if( ( _c & DURATION ) == 0 ){
-    int s = ( int(_state) + 1 ) % int(AnimCount);
-    setState( s );
-  }
+	// SPI.setClockDivider(SPI_CLOCK_DIV4);
+	
+	delay( 1000 );
 
-  _c++;
-  delay( DT );
+	strip.begin(); // Initialize pins for output
+	strip.show();  // Turn all LEDs off ASAP
+
+	setNextState( int( MARQUEE ) );
 }
 
-void setState( int state ) {
- _next =  static_cast<Anim>( state );
- _state = WIPE;
- 
- switch ( _state ) {
-    case WIPE:
-      head = FPS * 3;
-      break;
-  }
- 
-  // reset
-  _c = 0; 
-  
-  Serial.println( _state );
+void loop() {
+	
+	switch ( _state ) {
+		case CLOUD :
+			cloud( 0.5 );
+			break;
+		case CYLON :
+			cylon( cos( ( _c / 10 ) * DEG_TO_RAD ) * 2 + 2.8, true );
+			break;
+		case MARQUEE :
+			marquee( 0.05 );
+			break;
+		case CYCLE :
+			cycle( _c & DURATION );
+			break;
+		case WIPE:
+		default:
+			wipe();
+			break;
+	}
+
+	if( ( _c & DURATION ) == 0 ){
+		int s = ( int(_state) + 1 ) % int( AnimCount );
+		setNextState( s );
+	}
+
+	_c++;
+	delay( DT );
+}
+
+void setNextState( int state ) {
+	_next =  static_cast<Anim>( state );
+	_state = WIPE;
+	// reset
+	_c = 0; 
+	head = NUMPIXELS * 3;
+}
+
+void postWipe() {
+	_state = _next;
+	switch ( _state ) {
+	 	case MARQUEE:
+			break;
+		default:
+			break;
+	}
+	_c = 1;
+}
+
+void marquee( float tempo ) {
+	for( int i=0; i < NUMPIXELS; i+=4 ) {
+		strip.setPixelColor((i + head + 0) % NUMPIXELS, OFF);
+		strip.setPixelColor((i + head + 1) % NUMPIXELS, DARK_2);
+		strip.setPixelColor((i + head + 2) % NUMPIXELS, OFF);
+		strip.setPixelColor((i + head + 3) % NUMPIXELS, ACCENT_1);
+	}
+    strip.show();
+	head = int(_f) % NUMPIXELS;
+	_f += tempo;
 }
 
 void cylon( float tempo, boolean bounce ) {
-  for( int i=0; i < NUMPIXELS; i++ ) {
-    strip.setPixelColor(i, DARK_1);
-  }
-  strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head - 4, DARK_2);
-  strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head - 3, DARK_2);
-  strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head - 2, ACCENT_1);
-  strip.setPixelColor(head - 1 > NUMPIXELS ? 0 : head - 1, ACCENT_1);
-  strip.setPixelColor(head, ACCENT_2);
-  strip.setPixelColor(head + 1 > NUMPIXELS ? 0 : head + 1, ACCENT_1);
-  strip.setPixelColor(head + 2 > NUMPIXELS ? 0 : head + 2, ACCENT_1);
-  strip.setPixelColor(head + 2 > NUMPIXELS ? 0 : head + 3, DARK_2);
-  strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head + 4, DARK_2);
+	for( int i=0; i < NUMPIXELS; i++ ) {
+		strip.setPixelColor(i, DARK_1);
+	}
+	strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head - 4, DARK_2);
+	strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head - 3, DARK_2);
+	strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head - 2, ACCENT_1);
+	strip.setPixelColor(head - 1 > NUMPIXELS ? 0 : head - 1, ACCENT_1);
+	strip.setPixelColor(head, ACCENT_2);
+	strip.setPixelColor(head + 1 > NUMPIXELS ? 0 : head + 1, ACCENT_1);
+	strip.setPixelColor(head + 2 > NUMPIXELS ? 0 : head + 2, ACCENT_1);
+	strip.setPixelColor(head + 2 > NUMPIXELS ? 0 : head + 3, DARK_2);
+	strip.setPixelColor(head - 2 > NUMPIXELS ? 0 : head + 4, DARK_2);
 
-  strip.show();
-  if( bounce ){
-    head = sin( _f * DEG_TO_RAD ) * HALFPIXELS + HALFPIXELS;
-//    Serial.println( tempo );
-  } else {
-    head = int(_f) % NUMPIXELS;
-  }
-  
-  _f += tempo;
+	strip.show();
+
+	if( bounce ){
+		head = sin( _f * DEG_TO_RAD ) * HALFPIXELS + HALFPIXELS;
+	} else {
+		head = int(_f) % NUMPIXELS;
+	}
+	
+	_f += tempo;
 }
 
+void cycle( int frame ) {
+	uint8_t rgb[6]; // color components
+
+	uint32_t color1;
+	uint32_t color2;
+
+	int dur = ( DURATION + 1 ) / 3;
+
+	if( frame <= dur ) {
+		color1 = DARK_2;
+		color2 = GRAY;
+		hexToRGB( color1, rgb );
+		hexToRGB( color2, rgb + 3 );
+	}
+	else if( frame > dur && frame <= dur * 2 ) {
+		color1 = GRAY;
+		color2 = ACCENT_1;
+		hexToRGB( color1, rgb );
+		hexToRGB( color2, rgb + 3 );
+		frame -= dur;
+	}
+	else {
+		color1 = ACCENT_1;
+		color2 = DARK_2;
+		hexToRGB( color1, rgb );
+		hexToRGB( color2, rgb + 3 );
+		frame -= dur * 2;
+	}
+
+	frame = constrain( frame, 0, dur );
+
+	uint8_t r = linear( frame, rgb[0], rgb[3] - rgb[0], dur );
+	uint8_t g = linear( frame, rgb[1], rgb[4] - rgb[1], dur );
+	uint8_t b = linear( frame, rgb[2], rgb[5] - rgb[2], dur );
+
+	for( int i=0; i < NUMPIXELS; i++ ) {
+		strip.setPixelColor( i, r, g, b );
+	}
+	strip.show();
+}
+
+// Animation data (RGB) stored in flash mem
 prog_uint32_t cloud_rgb[512] PROGMEM = {
-  	0x0b6427, 0x0b6417, 0x0b6217, 0x0b6217, 0x0b6631, 0x0b7171, 0x0b7148, 0x0b7781,
+	0x0b6427, 0x0b6417, 0x0b6217, 0x0b6217, 0x0b6631, 0x0b7171, 0x0b7148, 0x0b7781,
 	0x21788b, 0x217b8b, 0x217fb6, 0x217c80, 0x217d92, 0x217c7c, 0x218168, 0x218033,
 	0x09841b, 0x097c2c, 0x097f1d, 0x097a2c, 0x097c32, 0x098888, 0x098c1d, 0x099a20,
 	0x09a818, 0x099818, 0x099118, 0x098818, 0x09881b, 0x099191, 0x098d18, 0x098118,
@@ -195,28 +257,43 @@ prog_uint32_t cloud_rgb[512] PROGMEM = {
 };
 
 void cloud( float tempo ) {
- for( int i=0; i < NUMPIXELS; i++ ) {
-   strip.setPixelColor( i, pgm_read_dword( cloud_rgb + ( int( _f + i ) & 511 ) ) );
- }
- strip.show();
- _f += tempo;
+	for( int i=0; i < NUMPIXELS; i++ ) {
+		strip.setPixelColor( i, pgm_read_dword( cloud_rgb + ( int( _f + i ) & 511 ) ) );
+	}
+	strip.show();
+	_f += tempo;
 }
 
 void wipe() {
-  // 3 wipes and exit to next state
-  if( head == 0 ){
-    _state = _next; 
-  }
-  else if( head > FPS * 2 ) {
-    strip.setPixelColor(head % NUMPIXELS, ACCENT_1);
-  }
-  else if( head < FPS * 2 && head > FPS ) {
-    strip.setPixelColor(NUMPIXELS - ( head % NUMPIXELS ), GRAY);
-  }
-  else {
-    strip.setPixelColor(head % NUMPIXELS, DARK_2);
-  }
-  
-  strip.show();
-  head--;
+	// 3 wipes and exit to next state
+	if( head == 0 ){
+		postWipe(); 
+	}
+	else if( head >= NUMPIXELS * 2 ) {
+		strip.setPixelColor( ( head % NUMPIXELS ) - 1, ACCENT_1);
+	}
+	else if( head < NUMPIXELS * 2 && head >= NUMPIXELS ) {
+		strip.setPixelColor(NUMPIXELS - ( head % NUMPIXELS ) - 1, GRAY);
+	}
+	else {
+		strip.setPixelColor( ( head % NUMPIXELS ) - 1, DARK_2);
+	}
+	
+	strip.show();
+	head--;
+}
+
+
+// ease equations
+
+float linear( float t, float b, float c, float d ) {
+	return c * t / d + b;
+};
+
+// utils
+
+void hexToRGB( uint32_t hex, uint8_t *out ) {
+	out[0] = ( hex >> 16 ) & 0xFF;
+	out[1] = ( hex >> 8  ) & 0xFF;
+	out[2] = hex & 0xFF;
 }
